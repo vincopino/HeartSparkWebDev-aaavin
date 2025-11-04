@@ -1,0 +1,27 @@
+{
+  "name": "webapp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build:css": "postcss styles.css -o dist/styles.css && copy node_modules\\@fortawesome\\fontawesome-free\\css\\all.min.css dist\\ && xcopy node_modules\\@fortawesome\\fontawesome-free\\webfonts dist\\webfonts\\ /E /I /Y",
+    "watch:css": "postcss styles.css -o dist/styles.css --watch",
+    "build:js": "copy node_modules\\bootstrap\\dist\\js\\bootstrap.bundle.min.js dist\\ && copy node_modules\\jquery\\dist\\jquery.min.js dist\\ && copy node_modules\\jquery-validation\\dist\\jquery.validate.min.js dist\\",
+    "build": "npm run build:css && npm run build:js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.1.0",
+    "bootstrap": "^5.3.8",
+    "jquery": "^3.7.1",
+    "jquery-validation": "^1.21.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "postcss-cli": "^11.0.1",
+    "postcss-import": "^16.1.1"
+  }
+}
