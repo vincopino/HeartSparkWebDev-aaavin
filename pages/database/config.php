@@ -1,79 +1,134 @@
 <?php
 
-// Enhanced session startup and security settings
-// (require_once should always be at the top of the file so session is started early)
+class SessionManager
+{
+    private static $initialized = false;
+    private static $opts = [
+        'timeout' => 1800,            
+        'samesite' => 'Lax',          
+        'force_secure' => false,      
+        'bind_ip' => false,           
+        'name' => 'heartspark_session'
+    ];
 
-// Determine whether connection is secure
-$secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
-$cookieDomain = $_SERVER['HTTP_HOST'] ?? '';
+    public static function initialize(array $options = [])
+    {
+        if (self::$initialized) return;
+        self::$opts = array_merge(self::$opts, $options);
 
-// Use a custom session name to avoid default PHPSESSID collisions
-session_name('heartspark_session');
+        $secure = self::$opts['force_secure'] || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+        $cookieDomain = $_SERVER['HTTP_HOST'] ?? '';
 
-// Enforce strict mode to reject uninitialized session IDs
-ini_set('session.use_strict_mode', '1');
+        session_name(self::$opts['name']);
+        ini_set('session.use_strict_mode', '1');
 
-// Set secure cookie params (PHP 7.3+ array style). Falls back to traditional call if needed.
-if (function_exists('session_set_cookie_params')) {
-  // PHP 7.3+ accepts an array for options
-  try {
-    session_set_cookie_params([
-      'lifetime' => 0,          // expire on browser close
-      'path' => '/',
-      'domain' => $cookieDomain,
-      'secure' => $secure,
-      'httponly' => true,
-      'samesite' => 'Lax'       // consider 'Strict' if compatible with your flows
-    ]);
-  } catch (ArgumentCountError $e) {
-    // Older PHP versions: fall back to positional parameters
-    session_set_cookie_params(0, '/', $cookieDomain, $secure, true);
-  }
+        
+        if (function_exists('session_set_cookie_params')) {
+            try {
+                session_set_cookie_params([
+                    'lifetime' => 0,
+                    'path' => '/',
+                    'domain' => $cookieDomain,
+                    'secure' => $secure,
+                    'httponly' => true,
+                    'samesite' => self::$opts['samesite']
+                ]);
+            } catch (\Throwable $e) {
+                
+                session_set_cookie_params(0, '/', $cookieDomain, $secure, true);
+            }
+        }
+
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        
+        if (empty($_SESSION['initiated'])) {
+            session_regenerate_id(true);
+            $_SESSION['initiated'] = time();
+        }
+
+        
+        if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > self::$opts['timeout']) {
+            self::destroy();
+            session_start();
+            session_regenerate_id(true);
+            $_SESSION['initiated'] = time();
+        }
+        $_SESSION['last_activity'] = time();
+
+        
+        $agent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+        if (!isset($_SESSION['user_agent'])) {
+            $_SESSION['user_agent'] = $agent;
+        } elseif ($_SESSION['user_agent'] !== $agent) {
+            session_regenerate_id(true);
+            $_SESSION['user_agent'] = $agent;
+        }
+
+        
+        if (self::$opts['bind_ip']) {
+            $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+            if (!isset($_SESSION['ip'])) {
+                $_SESSION['ip'] = $ip;
+            } elseif (!empty($ip) && $_SESSION['ip'] !== $ip) {
+                session_regenerate_id(true);
+                $_SESSION['ip'] = $ip;
+            }
+        }
+
+        self::$initialized = true;
+    }
+
+    public static function destroy()
+    {
+        $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000,
+                $params['path'], $params['domain'], $params['secure'], $params['httponly']
+            );
+        }
+        session_destroy();
+        self::$initialized = false;
+    }
+
+    public static function requireLogin($redirect = '/pages/login.php')
+    {
+        if (empty($_SESSION['user_id'])) {
+            header('Location: ' . $redirect);
+            exit;
+        }
+    }
+
+    public static function regenerate()
+    {
+        session_regenerate_id(true);
+    }
+
+    public static function get($key, $default = null)
+    {
+        return $_SESSION[$key] ?? $default;
+    }
+
+    public static function set($key, $value)
+    {
+        $_SESSION[$key] = $value;
+    }
 }
 
-// Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-  session_start();
+
+SessionManager::initialize();
+
+function ss_destroy_session()
+{
+    SessionManager::destroy();
 }
 
-// Prevent session fixation: regenerate ID when session is first created
-if (empty($_SESSION['initiated'])) {
-  session_regenerate_id(true);
-  $_SESSION['initiated'] = time();
-}
-
-// Inactivity timeout (seconds). If exceeded, destroy session and start a new one.
-$timeout = 1800; // 30 minutes
-if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout) {
-  // Clear session array
-  $_SESSION = [];
-  // Delete session cookie
-  if (ini_get('session.use_cookies')) {
-    $params = session_get_cookie_params();
-    setcookie(session_name(), '', time() - 42000,
-      $params['path'], $params['domain'], $params['secure'], $params['httponly']
-    );
-  }
-  session_destroy();
-  session_start();
-  session_regenerate_id(true);
-  $_SESSION['initiated'] = time();
-}
-$_SESSION['last_activity'] = time();
-
-// Basic session hijack checks: bind session to IP and user agent where possible
-$agent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-$ip = $_SERVER['REMOTE_ADDR'] ?? '';
-if (!isset($_SESSION['ip']) || !isset($_SESSION['user_agent'])) {
-  $_SESSION['ip'] = $ip;
-  $_SESSION['user_agent'] = $agent;
-} else {
-  // If mismatch detected, regenerate session id and update bindings
-  if ($_SESSION['user_agent'] !== $agent || ($_SESSION['ip'] !== $ip && !empty($ip))) {
-    session_regenerate_id(true);
-    $_SESSION['ip'] = $ip;
-    $_SESSION['user_agent'] = $agent;
-  }
+function ss_require_login()
+{
+    SessionManager::requireLogin();
 }
 
 
@@ -102,14 +157,14 @@ class Database {
     }
   }
 
-  // for connection access
+  
   public function getConnection()
   {
     return $this->pdo;
   }
 
 
-  // query execution helper
+  
   public function query($sql, $params = [])
   {
     try {
@@ -134,3 +189,4 @@ class Database {
     return $stmt->fetch();
   }
 }
+
