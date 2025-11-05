@@ -1,3 +1,6 @@
+Copino, Alvin C.
+BSIT 3-1
+
 ### Database Configuration
 
 On the root folder, import the .sql files
